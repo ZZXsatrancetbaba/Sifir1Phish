@@ -1,0 +1,2 @@
+# Sifir1Phish
+KESİNLİKLE EĞİTİM AMAÇLI YAPILMIŞ BİR PHİSHİNG ARACI!!!
