@@ -1,0 +1,91 @@
+# =============================================================================
+# Master Gombit - Secure PHP + MySQL Education Lab
+# Docker Compose (yalnızca lokal eğitim ortamı)
+#
+# GÜVENLİK NOTLARI:
+#  - Tüm port bind'leri 127.0.0.1'e sabittir; LAN'a/açığa yayın yapılmaz.
+#  - db servisi host ağına hiç port yayınlamaz (yalnızca iç compose ağı).
+#  - adminer profile arkasındadır: varsayılan KAPALI.
+#      Açmak için: docker compose --profile debug up
+#  - Parolalar .env üzerinden gelir; repoya asla gerçek secret girilmez.
+# =============================================================================
+
+name: master-gombit
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: master-gombit/app:local
+    container_name: mg_app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"          # Yalnızca localhost
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "false"
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-mg_lab}
+      DB_USER: ${DB_USER:-mg_user}
+      DB_PASS: ${DB_PASS:?Set DB_PASS in .env}
+      SESSION_NAME: MGBSID
+      FEATURE_INSECURE_DEMOS: ${FEATURE_INSECURE_DEMOS:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [mgnet]
+    read_only: false                  # PHP session/tmp yazması gerekir
+    security_opt:
+      - no-new-privileges:true
+
+  db:
+    image: mariadb:11.4
+    container_name: mg_db
+    restart: unless-stopped
+    # ÖNEMLİ: ports yok -> veritabanı host'a yayınlanmaz, yalnızca mgnet içi.
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?Set DB_ROOT_PASS in .env}
+      MARIADB_DATABASE: ${DB_NAME:-mg_lab}
+      MARIADB_USER: ${DB_USER:-mg_user}
+      MARIADB_PASSWORD: ${DB_PASS:?Set DB_PASS in .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION
+    volumes:
+      - mgdb:/var/lib/mysql
+      # İlk başlatmada şema + sentetik seed çalışır:
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [mgnet]
+    security_opt:
+      - no-new-privileges:true
+
+  # ---- OPSİYONEL DEBUG ARACI (varsayılan kapalı; profile ile açılır) ----
+  adminer:
+    image: adminer:latest
+    profiles: ["debug"]
+    container_name: mg_adminer
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"         # Yalnızca localhost
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DESIGN: pepa-linha
+    depends_on: [db]
+    networks: [mgnet]
+
+networks:
+  mgnet:
+    driver: bridge
+    internal: false   # composer kurulumu build sırasında gerekir; runtime'da app dışarı çıkmez
+
+volumes:
+  mgdb:

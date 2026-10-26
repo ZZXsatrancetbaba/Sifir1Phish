@@ -1,0 +1,22 @@
+# =============================================================================
+# Master Gombit - .gitignore
+# SECRET KORUMASI: .env ve storage içeriği asla commit edilmez.
+# =============================================================================
+/vendor/
+/env/
+.env
+.env.*
+!.env.example
+/storage/uploads/*
+!/storage/uploads/.gitkeep
+/storage/logs/*
+!/storage/logs/.gitkeep
+*.sqlite
+.phpunit.result.cache
+phpstan.nez.local
+composer.lock.bak
+.idea/
+.vscode/
+.DS_Store
+node_modules/
+docker-compose.override.yml

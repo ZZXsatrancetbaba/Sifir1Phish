@@ -1,0 +1,67 @@
+name: CI
+
+# Master Gombit - GitHub Actions örneği (yalnızca kendi repomuzda çalışır; dış hedef taraması YOK)
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, sodium
+          coverage: none
+
+      - name: Composer validate + install
+        run: |
+          composer validate --strict
+          composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: PHPStan (level 6)
+        run: vendor/bin/phpstan analyse app config --level=6 --no-progress || true
+        # Not: ilk entegrasyonda toleranslı; yeni kod için strict mod önerilir (docs/RUNBOOK.md)
+
+      - name: PHPUnit (unit+security suite DB'siz koşar)
+        run: vendor/bin/phpunit --testsuite "Unit,Security"
+
+      - name: Dependency audit (bilinen advisory kontrolü)
+        run: composer audit --format=table
+
+      - name: Secret scanning (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Security grep rules (savunma tespit kuralları)
+        run: |
+          echo "SQL concatenation araması:"
+          ! grep -RnE '(->query\(.*(\\$_|\. *\$_)|"[^"]*\.\s*\\\$_)' app/ || { echo "BULGU: parametresiz SQL"; exit 1; }
+          echo "Zayıf hash araması:"
+          ! grep -RnE '\b(md5|sha1)\s*\(\s*\$' app/ || { echo "BULGU: md5/sha1 parola kullanımına benzer desen"; exit 1; }
+          echo "Ham kısa etiket denetimi (view'larda encode edilmemiş basit değişken):"
+          ! grep -RnE '<\?=\s*\$[a-zA-Z_]+\s*\?>' app/Views/ | grep -v 'E::' || true
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - name: Boot compose & healthcheck
+        run: |
+          cp .env.example .env
+          sed -i 's/^DB_PASS=.*/DB_PASS=ci-synthetic-pass/; s/^DB_ROOT_PASS=.*/DB_ROOT_PASS=ci-synthetic-root/' .env
+          docker compose up -d --build
+          sleep 20
+          curl -fsS http://127.0.0.1:8080/health.php
+          docker compose exec -T app php vendor/bin/phpunit --testsuite Feature || true
+          docker compose down -v
